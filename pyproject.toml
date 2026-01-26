@@ -1,0 +1,15 @@
+[project]
+name = "arisu"
+version = "0.1.0"
+description = "Signal bot"
+readme = "README.md"
+requires-python = ">=3.12.9"
+dependencies = [
+    "beautifulsoup4>=4.14.3",
+    "dateparser>=1.2.2",
+    "openai>=2.15.0",
+    "python-dotenv>=1.2.1",
+    "signalbot>=0.21.0",
+    "structlog>=25.5.0",
+    "yt-dlp>=2025.12.8",
+]
