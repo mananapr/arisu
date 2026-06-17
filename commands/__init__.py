@@ -9,6 +9,7 @@ from .ud import UrbanDictionaryCommand
 from .dict import DictionaryCommand
 from .weather import WeatherCommand
 from .gpt import ChatGPTCommand
+from .duckhunt import DuckHuntCommand
 from .drug import DrugCommand
 from .yt import YTCommand
 from .sed import SedCommand
@@ -28,6 +29,7 @@ __all__ = [
     "UrbanDictionaryCommand",
     "DictionaryCommand",
     "ChatGPTCommand",
+    "DuckHuntCommand",
     "DrugCommand",
     "YTCommand",
     "SedCommand",

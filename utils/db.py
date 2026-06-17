@@ -34,6 +34,15 @@ INIT_SQL = """
         message TEXT NOT NULL,
         run_at TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS duckhunt_stats (
+        group_id TEXT NOT NULL,
+        player_uuid TEXT NOT NULL,
+        kills INTEGER NOT NULL DEFAULT 0,
+        misses INTEGER NOT NULL DEFAULT 0,
+        last_kill_at TEXT,
+        PRIMARY KEY (group_id, player_uuid)
+    );
 """
 
 

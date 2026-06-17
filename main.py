@@ -18,6 +18,7 @@ from commands import (
     DictionaryCommand,
     WeatherCommand,
     ChatGPTCommand,
+    DuckHuntCommand,
     DrugCommand,
     YTCommand,
     SedCommand,
@@ -42,6 +43,7 @@ COMMANDS = [
     DictionaryCommand,
     WeatherCommand,
     ChatGPTCommand,
+    DuckHuntCommand,
     DrugCommand,
     YTCommand,
     SedCommand,
@@ -75,6 +77,8 @@ def main() -> None:
             contacts=False,
             groups=GROUPS,
         )
+
+    DuckHuntCommand.schedule_spawns(bot, GROUPS)
     log.info("CMD_INIT_OK")
 
     bot.register
