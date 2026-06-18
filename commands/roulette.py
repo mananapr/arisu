@@ -77,18 +77,29 @@ class RouletteCommand(CommandWithHelpMessage):
             return
 
         player = str(context.message.source_uuid)
+        challenger = self._duel_state.challenger
+        challenged = self._duel_state.challenged
 
-        if player != self._duel_state.challenged:
-            await context.reply("Only the challenged player can decline.")
+        if player not in (challenger, challenged):
+            await context.reply("Only the challenger or challenged player can decline.")
             return
 
-        challenger = self._duel_state.challenger
         self._duel_state = None
+
+        if player == challenger:
+            await context.send(
+                "name cancelled the roulette challenge for name.",
+                mentions=[
+                    {"author": challenger, "start": 0, "length": 4},
+                    {"author": challenged, "start": 41, "length": 4},
+                ],
+            )
+            return
 
         await context.send(
             "name declined name's roulette challenge.",
             mentions=[
-                {"author": player, "start": 0, "length": 4},
+                {"author": challenged, "start": 0, "length": 4},
                 {"author": challenger, "start": 14, "length": 4},
             ],
         )
