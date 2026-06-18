@@ -22,6 +22,7 @@ class DuckHuntCommand(CommandWithHelpMessage):
     _active_until: ClassVar[datetime | None] = None
     _active_group_internal_id: ClassVar[str | None] = None
     _active_send_target: ClassVar[str | None] = None
+    _active_expire_job_id: ClassVar[str | None] = None
     _lock: ClassVar[asyncio.Lock] = asyncio.Lock()
 
     def help_message(self) -> str:
@@ -78,13 +79,14 @@ class DuckHuntCommand(CommandWithHelpMessage):
             cls._active_until = expires_at
             cls._active_group_internal_id = internal_id
             cls._active_send_target = send_target
+            cls._active_expire_job_id = cls._expire_job_id(group)
 
             bot.scheduler.add_job(
                 cls._expire_duck,
                 "date",
                 run_date=expires_at,
                 args=[bot, group],
-                id=cls._expire_job_id(group),
+                id=cls._active_expire_job_id,
                 replace_existing=True,
             )
 
@@ -102,6 +104,7 @@ class DuckHuntCommand(CommandWithHelpMessage):
             cls._active_until = None
             cls._active_group_internal_id = None
             cls._active_send_target = None
+            cls._active_expire_job_id = None
 
         await bot.send(send_target, "The duck got away...")
         cls._schedule_next_spawn(bot, group)
@@ -119,10 +122,12 @@ class DuckHuntCommand(CommandWithHelpMessage):
                 response = "BANG! You scared the air. Miss recorded."
             elif expires_at <= datetime.now(timezone.utc):
                 active_send_target = self._active_send_target or context.message.recipient()
+                active_expire_job_id = self._active_expire_job_id
                 self._active_until = None
                 self._active_group_internal_id = None
                 self._active_send_target = None
-                self._remove_job(context.bot, self._expire_job_id(active_send_target))
+                self._active_expire_job_id = None
+                self._remove_job(context.bot, active_expire_job_id)
                 self._record_shot(context, shooter, kill=False)
                 self._schedule_next_spawn(context.bot, active_send_target)
                 response = "Too late. The duck was already gone. Miss recorded."
@@ -131,10 +136,12 @@ class DuckHuntCommand(CommandWithHelpMessage):
                 response = "BANG! You scared the air. Miss recorded."
             else:
                 active_send_target = self._active_send_target or context.message.recipient()
+                active_expire_job_id = self._active_expire_job_id
                 self._active_until = None
                 self._active_group_internal_id = None
                 self._active_send_target = None
-                self._remove_job(context.bot, self._expire_job_id(active_send_target))
+                self._active_expire_job_id = None
+                self._remove_job(context.bot, active_expire_job_id)
                 self._record_shot(context, shooter, kill=True)
                 self._schedule_next_spawn(context.bot, active_send_target)
                 response = "🦆💥 Nice shot!"
@@ -241,7 +248,10 @@ class DuckHuntCommand(CommandWithHelpMessage):
         return f"duckhunt_expire:{group}"
 
     @staticmethod
-    def _remove_job(bot: SignalBot, job_id: str) -> None:
+    def _remove_job(bot: SignalBot, job_id: str | None) -> None:
+        if job_id is None:
+            return
+
         try:
             bot.scheduler.remove_job(job_id)
         except Exception:
