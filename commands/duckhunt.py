@@ -2,6 +2,7 @@ import asyncio
 from datetime import datetime, timedelta, timezone
 from random import randint
 from typing import ClassVar
+from zoneinfo import ZoneInfo
 
 from signalbot import Context, regex_triggered
 from signalbot.bot import SignalBot
@@ -10,9 +11,12 @@ from commands.help import CommandWithHelpMessage
 
 
 class DuckHuntCommand(CommandWithHelpMessage):
-    SPAWN_MIN_MINUTES = 60
-    SPAWN_MAX_MINUTES = 180
-    ACTIVE_WINDOW_SECONDS = 30
+    SPAWN_MIN_MINUTES = 20
+    SPAWN_MAX_MINUTES = 60
+    ACTIVE_WINDOW_SECONDS = 90
+    QUIET_HOURS_TZ = ZoneInfo("Asia/Kolkata")
+    QUIET_HOURS_START = 1
+    QUIET_HOURS_END = 7
 
     _active_ducks: ClassVar[dict[str, datetime]] = {}
     _locks: ClassVar[dict[str, asyncio.Lock]] = {}
@@ -40,6 +44,7 @@ class DuckHuntCommand(CommandWithHelpMessage):
     def _schedule_next_spawn(cls, bot: SignalBot, group: str) -> None:
         delay_minutes = randint(cls.SPAWN_MIN_MINUTES, cls.SPAWN_MAX_MINUTES)
         run_at = datetime.now(timezone.utc) + timedelta(minutes=delay_minutes)
+        run_at = cls._next_allowed_spawn_time(run_at)
 
         bot.scheduler.add_job(
             cls._spawn_duck,
@@ -182,6 +187,20 @@ class DuckHuntCommand(CommandWithHelpMessage):
             cls._locks[group] = lock
 
         return lock
+
+    @classmethod
+    def _next_allowed_spawn_time(cls, run_at: datetime) -> datetime:
+        local_time = run_at.astimezone(cls.QUIET_HOURS_TZ)
+
+        if cls.QUIET_HOURS_START <= local_time.hour < cls.QUIET_HOURS_END:
+            local_time = local_time.replace(
+                hour=cls.QUIET_HOURS_END,
+                minute=0,
+                second=0,
+                microsecond=0,
+            )
+
+        return local_time.astimezone(timezone.utc)
 
     @staticmethod
     def _spawn_job_id(group: str) -> str:
