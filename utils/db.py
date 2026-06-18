@@ -43,6 +43,16 @@ INIT_SQL = """
         last_kill_at TEXT,
         PRIMARY KEY (group_id, player_uuid)
     );
+
+    CREATE TABLE IF NOT EXISTS roulette_stats (
+        player_uuid TEXT PRIMARY KEY,
+        solo_survives INTEGER NOT NULL DEFAULT 0,
+        solo_deaths INTEGER NOT NULL DEFAULT 0,
+        duel_wins INTEGER NOT NULL DEFAULT 0,
+        duel_losses INTEGER NOT NULL DEFAULT 0,
+        current_streak INTEGER NOT NULL DEFAULT 0,
+        best_streak INTEGER NOT NULL DEFAULT 0
+    );
 """
 
 
