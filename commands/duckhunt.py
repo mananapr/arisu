@@ -18,8 +18,9 @@ class DuckHuntCommand(CommandWithHelpMessage):
     QUIET_HOURS_START = 1
     QUIET_HOURS_END = 7
 
-    _active_ducks: ClassVar[dict[str, datetime]] = {}
-    _locks: ClassVar[dict[str, asyncio.Lock]] = {}
+    _active_until: ClassVar[datetime | None] = None
+    _active_recipient: ClassVar[str | None] = None
+    _lock: ClassVar[asyncio.Lock] = asyncio.Lock()
 
     def help_message(self) -> str:
         return "duckhunt: random ducks appear - use /bang, /duckstats."
@@ -36,9 +37,8 @@ class DuckHuntCommand(CommandWithHelpMessage):
 
     @classmethod
     def schedule_spawns(cls, bot: SignalBot, groups: list[str]) -> None:
-        for group in groups:
-            if group not in cls._active_ducks:
-                cls._schedule_next_spawn(bot, group)
+        if groups:
+            cls._schedule_next_spawn(bot, groups[0])
 
     @classmethod
     def _schedule_next_spawn(cls, bot: SignalBot, group: str) -> None:
@@ -57,17 +57,16 @@ class DuckHuntCommand(CommandWithHelpMessage):
 
     @classmethod
     async def _spawn_duck(cls, bot: SignalBot, group: str) -> None:
-        lock = cls._lock_for(group)
-
-        async with lock:
-            if group in cls._active_ducks:
+        async with cls._lock:
+            if cls._active_until is not None:
                 cls._schedule_next_spawn(bot, group)
                 return
 
             expires_at = datetime.now(timezone.utc) + timedelta(
                 seconds=cls.ACTIVE_WINDOW_SECONDS
             )
-            cls._active_ducks[group] = expires_at
+            cls._active_until = expires_at
+            cls._active_recipient = group
 
             bot.scheduler.add_job(
                 cls._expire_duck,
@@ -82,40 +81,45 @@ class DuckHuntCommand(CommandWithHelpMessage):
 
     @classmethod
     async def _expire_duck(cls, bot: SignalBot, group: str) -> None:
-        lock = cls._lock_for(group)
-
-        async with lock:
-            if group not in cls._active_ducks:
+        async with cls._lock:
+            if cls._active_until is None:
                 return
 
-            cls._active_ducks.pop(group, None)
+            cls._active_until = None
+            cls._active_recipient = None
 
         await bot.send(group, "The duck got away...")
         cls._schedule_next_spawn(bot, group)
 
     async def _handle_bang(self, context: Context) -> None:
-        group = context.message.recipient()
+        recipient = context.message.recipient()
         shooter = str(context.message.source_uuid)
-        lock = self._lock_for(group)
         response = ""
 
-        async with lock:
-            expires_at = self._active_ducks.get(group)
+        async with self._lock:
+            expires_at = self._active_until
 
             if not expires_at:
                 self._record_shot(context, shooter, kill=False)
                 response = "BANG! You scared the air. Miss recorded."
             elif expires_at <= datetime.now(timezone.utc):
-                self._active_ducks.pop(group, None)
-                self._remove_job(context.bot, self._expire_job_id(group))
+                active_recipient = self._active_recipient or recipient
+                self._active_until = None
+                self._active_recipient = None
+                self._remove_job(context.bot, self._expire_job_id(active_recipient))
                 self._record_shot(context, shooter, kill=False)
-                self._schedule_next_spawn(context.bot, group)
+                self._schedule_next_spawn(context.bot, active_recipient)
                 response = "Too late. The duck was already gone. Miss recorded."
+            elif self._active_recipient != recipient:
+                self._record_shot(context, shooter, kill=False)
+                response = "BANG! You scared the air. Miss recorded."
             else:
-                self._active_ducks.pop(group, None)
-                self._remove_job(context.bot, self._expire_job_id(group))
+                active_recipient = self._active_recipient or recipient
+                self._active_until = None
+                self._active_recipient = None
+                self._remove_job(context.bot, self._expire_job_id(active_recipient))
                 self._record_shot(context, shooter, kill=True)
-                self._schedule_next_spawn(context.bot, group)
+                self._schedule_next_spawn(context.bot, active_recipient)
                 response = "🦆💥 Nice shot!"
 
         await context.reply(response)
@@ -177,16 +181,6 @@ class DuckHuntCommand(CommandWithHelpMessage):
             (group, shooter, 1 if kill else 0, 0 if kill else 1, now if kill else None),
         )
         db.commit()
-
-    @classmethod
-    def _lock_for(cls, group: str) -> asyncio.Lock:
-        lock = cls._locks.get(group)
-
-        if lock is None:
-            lock = asyncio.Lock()
-            cls._locks[group] = lock
-
-        return lock
 
     @classmethod
     def _next_allowed_spawn_time(cls, run_at: datetime) -> datetime:
