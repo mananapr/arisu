@@ -1,4 +1,5 @@
 import asyncio
+import os
 from datetime import datetime, timedelta, timezone
 from random import randint
 from typing import ClassVar
@@ -19,18 +20,23 @@ class DuckHuntCommand(CommandWithHelpMessage):
     QUIET_HOURS_END = 7
 
     _active_until: ClassVar[datetime | None] = None
-    _active_recipient: ClassVar[str | None] = None
+    _active_group_internal_id: ClassVar[str | None] = None
+    _active_send_target: ClassVar[str | None] = None
     _lock: ClassVar[asyncio.Lock] = asyncio.Lock()
 
     def help_message(self) -> str:
         return "duckhunt: random ducks appear - use /bang, /duckstats."
 
-    @regex_triggered(r"^/(bang|duckstats)$")
+    @regex_triggered(r"^/(bang|duckstats|duck)$")
     async def handle(self, context: Context) -> None:
         text = (context.message.text or "").strip()
 
         if text == "/bang":
             await self._handle_bang(context)
+            return
+
+        if text == "/duck":
+            await self._handle_duck(context)
             return
 
         await self._handle_stats(context)
@@ -57,6 +63,10 @@ class DuckHuntCommand(CommandWithHelpMessage):
 
     @classmethod
     async def _spawn_duck(cls, bot: SignalBot, group: str) -> None:
+        group_info = cls._resolve_group_info(bot, group)
+        send_target = group_info["id"] if group_info else group
+        internal_id = group_info["internal_id"] if group_info else group
+
         async with cls._lock:
             if cls._active_until is not None:
                 cls._schedule_next_spawn(bot, group)
@@ -66,7 +76,8 @@ class DuckHuntCommand(CommandWithHelpMessage):
                 seconds=cls.ACTIVE_WINDOW_SECONDS
             )
             cls._active_until = expires_at
-            cls._active_recipient = group
+            cls._active_group_internal_id = internal_id
+            cls._active_send_target = send_target
 
             bot.scheduler.add_job(
                 cls._expire_duck,
@@ -77,22 +88,26 @@ class DuckHuntCommand(CommandWithHelpMessage):
                 replace_existing=True,
             )
 
-        await bot.send(group, "A wild duck appears! /bang")
+        await bot.send(send_target, "A wild duck appears! /bang")
 
     @classmethod
     async def _expire_duck(cls, bot: SignalBot, group: str) -> None:
+        send_target = group
+
         async with cls._lock:
             if cls._active_until is None:
                 return
 
+            send_target = cls._active_send_target or group
             cls._active_until = None
-            cls._active_recipient = None
+            cls._active_group_internal_id = None
+            cls._active_send_target = None
 
-        await bot.send(group, "The duck got away...")
+        await bot.send(send_target, "The duck got away...")
         cls._schedule_next_spawn(bot, group)
 
     async def _handle_bang(self, context: Context) -> None:
-        recipient = context.message.recipient()
+        group_internal_id = context.message.group or context.message.recipient()
         shooter = str(context.message.source_uuid)
         response = ""
 
@@ -103,26 +118,34 @@ class DuckHuntCommand(CommandWithHelpMessage):
                 self._record_shot(context, shooter, kill=False)
                 response = "BANG! You scared the air. Miss recorded."
             elif expires_at <= datetime.now(timezone.utc):
-                active_recipient = self._active_recipient or recipient
+                active_send_target = self._active_send_target or context.message.recipient()
                 self._active_until = None
-                self._active_recipient = None
-                self._remove_job(context.bot, self._expire_job_id(active_recipient))
+                self._active_group_internal_id = None
+                self._active_send_target = None
+                self._remove_job(context.bot, self._expire_job_id(active_send_target))
                 self._record_shot(context, shooter, kill=False)
-                self._schedule_next_spawn(context.bot, active_recipient)
+                self._schedule_next_spawn(context.bot, active_send_target)
                 response = "Too late. The duck was already gone. Miss recorded."
-            elif self._active_recipient != recipient:
+            elif self._active_group_internal_id != group_internal_id:
                 self._record_shot(context, shooter, kill=False)
                 response = "BANG! You scared the air. Miss recorded."
             else:
-                active_recipient = self._active_recipient or recipient
+                active_send_target = self._active_send_target or context.message.recipient()
                 self._active_until = None
-                self._active_recipient = None
-                self._remove_job(context.bot, self._expire_job_id(active_recipient))
+                self._active_group_internal_id = None
+                self._active_send_target = None
+                self._remove_job(context.bot, self._expire_job_id(active_send_target))
                 self._record_shot(context, shooter, kill=True)
-                self._schedule_next_spawn(context.bot, active_recipient)
+                self._schedule_next_spawn(context.bot, active_send_target)
                 response = "🦆💥 Nice shot!"
 
         await context.reply(response)
+
+    async def _handle_duck(self, context: Context) -> None:
+        if not self._is_bot_sender(context):
+            return
+
+        await self._spawn_duck(context.bot, context.message.recipient())
 
     async def _handle_stats(self, context: Context) -> None:
         group = context.message.recipient()
@@ -195,6 +218,19 @@ class DuckHuntCommand(CommandWithHelpMessage):
             )
 
         return local_time.astimezone(timezone.utc)
+
+    @staticmethod
+    def _resolve_group_info(bot: SignalBot, group_ref: str) -> dict | None:
+        for group in bot.groups:
+            if group_ref in (group["name"], group["id"], group["internal_id"]):
+                return group
+
+        return None
+
+    @staticmethod
+    def _is_bot_sender(context: Context) -> bool:
+        phone_number = os.environ.get("PHONE_NUMBER") or context.bot.config.phone_number
+        return context.message.source == phone_number or context.message.source_number == phone_number
 
     @staticmethod
     def _spawn_job_id(group: str) -> str:
